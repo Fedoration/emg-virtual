@@ -1,0 +1,31 @@
+ запуск проекта юнити:
+1) открыть "UnityHub"
+2) в открывшемся окне выбрать проект "Salut_Unity"
+3) выбрать нужную сцену (либо запись данных, либо Realtime_training, см ниже)
+
+
+запись данных:
+1) открыть папку на рабочем столе "Salut_project/python/default" 
+2) запустить файл "1_start_raw_200Hz.bat"
+3) запустить файл "2_start_LSL_get_data_events.bat"
+4) открыть проект юнити(см выше)
+5) слева снизу на панели "Project" выбрать папку "Assets\MAIN\Scenes" и открыть файл сцены "ExperimentScene.unity"
+6) нажать кнопку "Play" вверху
+7) начать тестирование
+
+данные будут сохраняться в папку "D:\repos\SALUT_ML\inference_vis\actual_inference_scripts\recorded_data"
+
+
+Realtime_Training:
+1) открыть папку на рабочем столе "Salut_project/python/realtime" 
+2) запустить файл "1_start_emg_myo_buffer.bat" # только для браслета
+3) запустить файл "2_start_realtime_predict.bat"
+4) открыть проект юнити (см выше)
+5) слева снизу на панели "Project" выбрать папку "Assets\MAIN\Scenes" и открыть файл сцены "realTimeTesting.unity"
+6) нажать кнопку "Play" вверху
+7) запустить файл "3_start_continious.bat".
+	В папку "D:\repos\SALUT_ML\realtime_training\realtime_data" начнут сохраняться данные для обучения. 
+	Нужно подождать пока сохранится не менее 4 файлов.
+
+8) запустить файл "4_start_realtime_training.bat", тогда начнется обучение модели
+	В папку "D:\repos\SALUT_ML\realtime_training\realtime_weights" начнут сохраняться веса и автоматически подгружаться в модель
