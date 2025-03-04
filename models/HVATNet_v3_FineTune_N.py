@@ -125,14 +125,14 @@ class AdvancedConvBlock(nn.Module):
     To do:
         add res blocks.
     """
-    def __init__(self, in_channels, kernel_size,dilation=1):
+    def __init__(self, in_channels, kernel_size, dilation=1):
         super(AdvancedConvBlock, self).__init__()
 
         # use it instead stride.
 
         self.conv_dilated = nn.Conv1d(in_channels, in_channels,
                                       kernel_size=kernel_size,
-                                      dilation = dilation,
+                                      dilation=dilation,
                                       bias=True,
                                       padding='same')
 
@@ -174,7 +174,7 @@ class AdvancedConvBlock(nn.Module):
 
 class AdvancedEncoder(nn.Module):
     def __init__(self, n_blocks_per_layer=3, n_filters=64, kernel_size=3,
-                 dilation=1, strides = (2, 2, 2)):
+                 dilation=1, strides=(2, 2, 2)):
         super(AdvancedEncoder, self).__init__()
 
         self.n_layers = len(strides)
@@ -183,7 +183,7 @@ class AdvancedEncoder(nn.Module):
 
         conv_layers = []
         for i in range(self.n_layers):
-            blocks = nn.ModuleList([AdvancedConvBlock(n_filters,kernel_size,
+            blocks = nn.ModuleList([AdvancedConvBlock(n_filters, kernel_size,
                                                       dilation=dilation) for i in range(n_blocks_per_layer)])
             
             layer = nn.Sequential(*blocks)
@@ -283,7 +283,7 @@ class HVATNetv3(nn.Module):
 
         self.encoder = AdvancedEncoder(n_blocks_per_layer=n_blocks_per_layer,
                                        n_filters=n_filters, kernel_size=kernel_size,
-                                       dilation=dilation, strides = strides)
+                                       dilation=dilation, strides=strides)
         self.dropout1 = torch.nn.Dropout(p=0.5, inplace=False)
         self.mapper = nn.Sequential(nn.Conv1d(n_filters, n_filters, kernel_size, padding='same'), 
                                     nn.GELU(), 
@@ -293,7 +293,7 @@ class HVATNetv3(nn.Module):
         self.dropout2 = torch.nn.Dropout(p=0.5, inplace=False)
         self.encoder_small = AdvancedEncoder(n_blocks_per_layer=n_blocks_per_layer,
                                             n_filters=n_filters, kernel_size=kernel_size,
-                                            dilation=dilation, strides = small_strides)
+                                            dilation=dilation, strides=small_strides)
         self.dropout3 = torch.nn.Dropout(p=0.5, inplace=False)
         self.decoder_small = AdvancedDecoder(n_blocks_per_layer=n_blocks_per_layer,
                                              n_filters=n_filters, kernel_size=kernel_size,
