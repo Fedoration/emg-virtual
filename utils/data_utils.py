@@ -452,9 +452,11 @@ def create_dataset(
 
         # VLAD: for recordings, that were done with 500 Hz, we use downsampling
         if data["data_myo"].shape[0] > 40_000:
+            print(f"Fs before downsampling: {1 / np.mean(np.diff(data['myo_ts']))}")
             data["data_myo"] = data["data_myo"][::2]
             data["data_vr"] = data["data_vr"][::2]
             data["myo_ts"] = data["myo_ts"][::2]
+            print(f"Fs after downsampling: {1 / np.mean(np.diff(data['myo_ts']))}")
 
         # VLAD: filtering of raw data
         empty = np.empty(data["data_myo"].shape)
@@ -556,6 +558,148 @@ def create_dataset(
 
     return dataset
 
+
+def prepare_data(
+    data_folder: Path,
+    original_fps: int,
+    delay_ms: int,
+    start_crop_ms: int,
+    window_size: int,
+    random_sampling: bool,
+    samples_per_epoch: Optional = None,
+    return_support_info: bool = False,
+    transform=None,
+    down_sample_target=None,
+):
+    """
+    delay_ms - -40 it means emg[40:] and vr[:-40]
+    dealy of emg compare with vr. vr changes and we'll see change in emg after 40 ms.
+    """
+    # Loop over files in data dir
+    all_paths = sorted(data_folder.glob("*.npz"))
+    all_paths = natsorted(all_paths)
+
+    print(f"Number of moves: {len(all_paths)} | Dataset: {data_folder.parents[1].name}")
+
+    exps_data = []
+    for one_exp_data_path in tqdm(all_paths):
+
+        data = load_data_from_one_exp(one_exp_data_path)
+        data, _, _ = strip_nans_for_one_exp(data)
+
+        if data is None:
+            print("No VR for this file:", one_exp_data_path)
+            continue
+
+        data = interpolate_quats_for_one_exp(data, quat_interpolate_method="slerp")
+
+        # VLAD: for recordings, that were done with 500 Hz, we use downsampling
+        if data["data_myo"].shape[0] > 40_000:
+            print(f"Fs before downsampling: {1 / np.mean(np.diff(data['myo_ts']))}")
+            data["data_myo"] = data["data_myo"][::2]
+            data["data_vr"] = data["data_vr"][::2]
+            data["myo_ts"] = data["myo_ts"][::2]
+            print(f"Fs after downsampling: {1 / np.mean(np.diff(data['myo_ts']))}")
+
+        # VLAD: filtering of raw data
+        empty = np.empty(data["data_myo"].shape)
+
+        std_range = 6
+
+        for electrode in range(data["data_myo"].shape[1]):
+            da = data["data_myo"][:, electrode]
+            dat = da[~np.isnan(da)]
+
+            samp_freq = 250  # Sample frequency (Hz)
+            notch_freq = 50.0  # Frequency to be removed from signal (Hz)
+            quality_factor = 30.0  # Quality factor
+
+            b_notch, a_notch = signal.iirnotch(notch_freq, quality_factor, samp_freq)
+            freq, h = signal.freqz(b_notch, a_notch, fs=samp_freq)
+
+            emg_filt = signal.filtfilt(b_notch, a_notch, dat)
+
+            emg_filt_norm = butter_highpass_filter(emg_filt, 10, 125, order=5)
+
+            diff_in_length = len(da) - len(emg_filt_norm)
+
+            emg_filt_norm = np.append(emg_filt_norm, np.zeros(diff_in_length) + np.nan)
+
+            empty[:, electrode] = emg_filt_norm
+
+        # cutting down outliers
+        cleanest = np.empty(data["data_myo"].shape)
+        std_threshold = std_range * np.max(np.nanstd(empty, axis=0))
+
+        for electrode in range(data["data_myo"].shape[1]):
+            one_signal = empty[:, electrode]
+            one_signal_clean = one_signal[~np.isnan(one_signal)]
+
+            clear_up = np.where(
+                one_signal_clean < std_threshold, one_signal_clean, std_threshold
+            )
+            clear_down = np.where(
+                clear_up > -1 * std_threshold, clear_up, -1 * std_threshold
+            )
+
+            diff_in_length = len(one_signal) - len(clear_down)
+            final_signal = np.append(clear_down, np.zeros(diff_in_length) + np.nan)
+            cleanest[:, electrode] = final_signal
+
+        maxx = np.nanmax(cleanest)
+        minn = np.nanmin(cleanest)
+        # here I (Vlad) normalize data based on the whole set of signals.
+        # EMG preproc: normalize -> (-1, 1) range as audio.
+
+        emg_min_max = (cleanest - minn) / (maxx - minn)  # (0, 1)
+        emg_min_max = 2 * emg_min_max - 1
+
+        # I do scaling on the whole dataset, but that creates vertical shifts (+- 0.2) in data, so i substract this shift
+        data_myo = emg_min_max - np.nanmean(emg_min_max, axis=0)
+
+        data["data_myo"] = data_myo
+
+        # VR quats preproc:
+        data["data_vr"] = data["data_vr"][:, :, 4:8]
+        data["data_vr"] = np.stack([inverse_rotations(r) for r in data["data_vr"]])
+        data["data_vr"] = fix_sign_quats(data["data_vr"])
+
+        # Crop starting bad points
+        start_crop_idxs = int(start_crop_ms / 1000 * original_fps)
+        n_crop_idxs = int(delay_ms / 1000 * original_fps)
+
+        data["data_vr"] = data["data_vr"][start_crop_idxs:]
+        data["data_myo"] = data["data_myo"][start_crop_idxs:]
+        data["myo_ts"] = data["myo_ts"][start_crop_idxs:]
+
+        # temporal alighnment
+        # if n_crop_idxs is 0 do nothing
+        if n_crop_idxs > 0:
+            data["data_vr"] = data["data_vr"][n_crop_idxs:]
+            data["data_myo"] = data["data_myo"][:-n_crop_idxs]
+        elif n_crop_idxs < 0:
+            data["data_vr"] = data["data_vr"][:n_crop_idxs]
+            data["data_myo"] = data["data_myo"][-n_crop_idxs:]
+
+        assert (
+            data["data_vr"].shape[0] == data["data_myo"].shape[0]
+        ), f'lens of data_vr and data_myo are different {data["data_vr"].shape} !=  {data["data_myo"].shape}'
+
+        exps_data.append(data)
+
+    dataset = VRHandMYODataset(
+        exps_data,
+        window_size=window_size,
+        random_sampling=random_sampling,
+        samples_per_epoch=samples_per_epoch,
+        return_support_info=return_support_info,
+        transform=transform,
+        down_sample_target=down_sample_target,
+    )
+
+    print(f"Total len: {len(dataset)}")  # max numbers of different windows over
+
+    return dataset        
 
 # augmentations
 def make_electrode_shifting(data, min_angle, max_angle, p=0.5):
